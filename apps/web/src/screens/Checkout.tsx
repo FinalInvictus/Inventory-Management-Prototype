@@ -7,7 +7,6 @@ import {
   ErrorBox,
   fmtDate,
   PriceSourceTag,
-  scanSupported,
   Spinner,
   Tag,
 } from '../components/ui';
@@ -16,7 +15,7 @@ import { MobileShell } from './MobileHome';
 import type { Garment, Sale } from '../types';
 
 export function CheckoutScreen() {
-  const { settings, money, toast } = useApp();
+  const { settings, money, refreshMeta, bumpDataVersion, toast } = useApp();
   const nav = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -89,6 +88,7 @@ export function CheckoutScreen() {
   const tax = Math.round((subtotal - discount) * taxRate) / 100;
   const total = Math.round((subtotal - discount + tax) * 100) / 100;
   const tendered = tenderedInput.trim() !== '' ? Number(tenderedInput) : total;
+  const underTendered = paymentMethod === 'cash' && tenderedInput.trim() !== '' && tendered + 0.001 < total;
   const changeDue = paymentMethod === 'cash' ? Math.max(0, Math.round((tendered - total) * 100) / 100) : 0;
 
   const completeSale = async () => {
@@ -105,6 +105,8 @@ export function CheckoutScreen() {
         payment_method: paymentMethod,
         amount_tendered: paymentMethod === 'cash' ? tendered : undefined,
       });
+      bumpDataVersion();
+      refreshMeta().catch(() => {});
       toast(`Sale ${completed.number} completed!`);
       nav(`/m/receipt/${completed.id}`);
     } catch (e) {
@@ -297,10 +299,10 @@ export function CheckoutScreen() {
               type="button"
               data-testid="complete-checkout-btn"
               className="btn primary full mt-sm"
-              disabled={submitting}
+              disabled={submitting || underTendered}
               onClick={completeSale}
             >
-              {submitting ? 'Completing Demo Sale…' : `✓ Complete Demo Checkout · ${money(total)}`}
+              {submitting ? 'Completing Demo Sale…' : underTendered ? 'Cash tendered is less than total' : `✓ Complete Demo Checkout · ${money(total)}`}
             </button>
             <div className="muted tiny center mt-xs">
               Simulated checkout — no real payment gateway is called.

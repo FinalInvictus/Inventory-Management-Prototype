@@ -1,15 +1,16 @@
 import { useEffect, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useApp } from '../context';
-import { DemoBanner, Empty, ErrorBox, PriceSourceTag, Spinner, StatusTag, Tag, timeAgo } from '../components/ui';
-import { get, post } from '../api';
+import { DemoBanner, Empty, ErrorBox, Modal, PriceSourceTag, Spinner, StatusTag, Tag, timeAgo } from '../components/ui';
+import { get, getCached, post } from '../api';
 import type { DashboardSummary, Garment } from '../types';
 
 export function MobileShell({ children, title, backTo }: { children: React.ReactNode; title?: string; backTo?: string }) {
-  const { user, login, logout, settings, toast } = useApp();
+  const { user, login, logout, settings, refreshMeta, bumpDataVersion, toast } = useApp();
   const loc = useLocation();
   const nav = useNavigate();
   const [busy, setBusy] = useState(false);
+  const [confirmReset, setConfirmReset] = useState(false);
 
   const switchRole = async (role: 'employee' | 'admin') => {
     setBusy(true);
@@ -23,13 +24,14 @@ export function MobileShell({ children, title, backTo }: { children: React.React
   };
 
   const resetDemo = async () => {
-    if (!window.confirm('Restore seeded demo inventory, categories and sales?')) return;
     setBusy(true);
     try {
       await post('/api/v1/demo/reset');
+      await refreshMeta();
+      bumpDataVersion();
+      setConfirmReset(false);
       toast('Demo data reset to seeded state');
       nav('/m');
-      window.location.reload();
     } finally {
       setBusy(false);
     }
@@ -60,14 +62,40 @@ export function MobileShell({ children, title, backTo }: { children: React.React
             onClick={() => switchRole('admin')}
             title="Switch to Admin Dashboard"
           >
-            📊 Admin
+            Admin
           </button>
-          <button className="btn xs ghost" data-testid="mobile-reset-btn" disabled={busy} onClick={resetDemo} title="Reset seeded demo data">
-            ↺ Reset
+          <button
+            className="btn xs ghost"
+            data-testid="mobile-reset-btn"
+            disabled={busy}
+            onClick={() => setConfirmReset(true)}
+            title="Reset seeded demo data"
+          >
+            Reset
           </button>
           <button className="btn xs ghost" onClick={() => { logout(); nav('/login'); }}>Exit</button>
         </div>
       </header>
+
+      {confirmReset && (
+        <Modal title="Restore Seeded Demo Dataset?" onClose={() => setConfirmReset(false)}>
+          <p className="muted small">
+            This restores the original 14 sample garments, 7 categories, 2 batches, and 3 completed demo sales.
+          </p>
+          <div className="row end gap mt-sm">
+            <button type="button" className="btn ghost" onClick={() => setConfirmReset(false)}>Cancel</button>
+            <button
+              type="button"
+              data-testid="confirm-reset-btn"
+              className="btn danger"
+              disabled={busy}
+              onClick={resetDemo}
+            >
+              {busy ? 'Restoring…' : 'Restore Seeded Data'}
+            </button>
+          </div>
+        </Modal>
+      )}
 
       <main className="m-main">{children}</main>
 
@@ -94,15 +122,15 @@ export function MobileShell({ children, title, backTo }: { children: React.React
 }
 
 export function MobileHomeScreen() {
-  const { money, user } = useApp();
+  const { money, user, dataVersion } = useApp();
   const nav = useNavigate();
-  const [sum, setSum] = useState<DashboardSummary | null>(null);
-  const [recent, setRecent] = useState<Garment[]>([]);
+  const [sum, setSum] = useState<DashboardSummary | null>(() => getCached<DashboardSummary>('/api/v1/dashboard/summary') ?? null);
+  const [recent, setRecent] = useState<Garment[]>(() => getCached<{ items: Garment[] }>('/api/v1/garments')?.items.slice(0, 4) ?? []);
   const [err, setErr] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!sum);
 
   const load = async () => {
-    setLoading(true);
+    if (!sum) setLoading(true);
     setErr('');
     try {
       const [d, g] = await Promise.all([
@@ -118,7 +146,7 @@ export function MobileHomeScreen() {
     }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); }, [dataVersion]);
 
   return (
     <MobileShell>

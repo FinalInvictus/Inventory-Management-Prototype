@@ -34,7 +34,7 @@ type Server struct {
 }
 
 func New(store *demo.Store, staticDir string) *Server {
-	return &Server{Store: store, StaticDir: staticDir, MockDelay: 900 * time.Millisecond,
+	return &Server{Store: store, StaticDir: staticDir, MockDelay: 180 * time.Millisecond,
 		sessions: map[string]string{}, pending: map[string]string{}}
 }
 
@@ -131,6 +131,7 @@ func (s *Server) Handler() http.Handler {
 	m.HandleFunc("GET /api/v1/health", s.health)
 	m.HandleFunc("POST /api/v1/demo/login", s.login)
 	m.HandleFunc("GET /api/v1/demo/me", s.auth(any_, s.me))
+	m.HandleFunc("GET /api/v1/demo/bootstrap", s.auth(any_, s.bootstrap))
 	m.HandleFunc("POST /api/v1/demo/logout", s.auth(any_, s.logout))
 	m.HandleFunc("POST /api/v1/demo/reset", s.auth(any_, s.reset))
 	m.HandleFunc("GET /api/v1/demo/samples", s.samples)
@@ -1313,6 +1314,38 @@ func (s *Server) getSettings(w http.ResponseWriter, r *http.Request, u demo.User
 		}
 	})
 	writeJSON(w, 200, map[string]any{"settings": out, "branch_name": branch, "ai_mode": classification.Mode()})
+	return nil
+}
+
+func (s *Server) bootstrap(w http.ResponseWriter, r *http.Request, u demo.User) error {
+	var settings demo.Settings
+	var branch string
+	var cats []map[string]any
+	s.Store.Read(func(st *demo.State) {
+		settings = st.Settings
+		for _, b := range st.Branches {
+			if b.ID == settings.BranchID {
+				branch = b.Name
+			}
+		}
+		for _, c := range st.Categories {
+			count := 0
+			for _, g := range st.Garments {
+				if g.CategoryID == c.ID && g.Status == "available" {
+					count++
+				}
+			}
+			cats = append(cats, map[string]any{"id": c.ID, "name": c.Name, "parent_id": c.ParentID, "default_price": c.DefaultPrice,
+				"active": c.Active, "subcategories": c.Subcategories, "is_leaf": st.IsLeaf(c.ID), "available_count": count})
+		}
+	})
+	writeJSON(w, 200, map[string]any{
+		"user":        u,
+		"settings":    settings,
+		"branch_name": branch,
+		"ai_mode":     classification.Mode(),
+		"categories":  cats,
+	})
 	return nil
 }
 

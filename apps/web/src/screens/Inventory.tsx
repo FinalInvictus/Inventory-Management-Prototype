@@ -14,24 +14,24 @@ import {
   StatusTag,
   Tag,
 } from '../components/ui';
-import { get } from '../api';
+import { get, getCached } from '../api';
 import { MobileShell } from './MobileHome';
 import type { Garment } from '../types';
 
 export function InventoryScreen() {
-  const { categories, money } = useApp();
+  const { categories, money, dataVersion } = useApp();
   const nav = useNavigate();
 
-  const [items, setItems] = useState<Garment[]>([]);
+  const [items, setItems] = useState<Garment[]>(() => getCached<{ items: Garment[] }>('/api/v1/garments?')?.items ?? []);
   const [q, setQ] = useState('');
   const [status, setStatus] = useState<'all' | 'available' | 'sold'>('all');
   const [categoryId, setCategoryId] = useState('');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(items.length === 0);
   const [err, setErr] = useState('');
   const [scanOpen, setScanOpen] = useState(false);
 
   const load = async (query = q, st = status, cat = categoryId) => {
-    setLoading(true);
+    if (items.length === 0) setLoading(true);
     setErr('');
     try {
       const params = new URLSearchParams();
@@ -49,7 +49,14 @@ export function InventoryScreen() {
 
   useEffect(() => {
     load(q, status, categoryId);
-  }, [status, categoryId]);
+  }, [status, categoryId, dataVersion]);
+
+  useEffect(() => {
+    const t = setTimeout(() => {
+      load(q, status, categoryId);
+    }, 150);
+    return () => clearTimeout(t);
+  }, [q]);
 
   const onSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();

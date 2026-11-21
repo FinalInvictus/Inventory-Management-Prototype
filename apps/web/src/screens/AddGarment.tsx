@@ -9,7 +9,7 @@ import type { Batch, Classification, Garment, PriceSource, Sample } from '../typ
 type Step = 'batch' | 'camera' | 'intake' | 'barcode';
 
 export function AddGarmentScreen() {
-  const { categories, money, catName, toast } = useApp();
+  const { categories, money, catName, refreshMeta, bumpDataVersion, toast } = useApp();
   const nav = useNavigate();
 
   const [step, setStep] = useState<Step>('batch');
@@ -27,6 +27,19 @@ export function AddGarmentScreen() {
   const [imageLabel, setImageLabel] = useState('');
   const [liveCamOpen, setLiveCamOpen] = useState(false);
   const videoRef = useRef<HTMLVideoElement>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+
+  const stopLiveCamera = () => {
+    streamRef.current?.getTracks().forEach(t => t.stop());
+    streamRef.current = null;
+    setLiveCamOpen(false);
+  };
+
+  useEffect(() => {
+    return () => {
+      streamRef.current?.getTracks().forEach(t => t.stop());
+    };
+  }, []);
 
   // AI & Classification state
   const [classifying, setClassifying] = useState(false);
@@ -176,13 +189,14 @@ export function AddGarmentScreen() {
     setLiveCamOpen(true);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
+      streamRef.current = stream;
       if (videoRef.current) {
         videoRef.current.srcObject = stream;
         await videoRef.current.play();
       }
     } catch {
       toast('Device camera unavailable — use sample gallery or file upload', 'info');
-      setLiveCamOpen(false);
+      stopLiveCamera();
     }
   };
 
@@ -193,9 +207,7 @@ export function AddGarmentScreen() {
     canvas.height = videoRef.current.videoHeight || 400;
     const ctx = canvas.getContext('2d');
     ctx?.drawImage(videoRef.current, 0, 0, canvas.width, canvas.height);
-    const stream = videoRef.current.srcObject as MediaStream | null;
-    stream?.getTracks().forEach(t => t.stop());
-    setLiveCamOpen(false);
+    stopLiveCamera();
     canvas.toBlob(async blob => {
       if (!blob) return;
       try {
@@ -291,6 +303,8 @@ export function AddGarmentScreen() {
       setCreatedGarment(created);
       setShowReview(false);
       setStep('barcode');
+      bumpDataVersion();
+      refreshMeta().catch(() => {});
       toast(`Created ${created.barcode}`);
     } catch (err) {
       setSaveErr((err as Error).message);
@@ -457,10 +471,10 @@ export function AddGarmentScreen() {
               </div>
 
               {liveCamOpen && (
-                <Modal title="Capture Garment Photo" onClose={() => setLiveCamOpen(false)}>
+                <Modal title="Capture Garment Photo" onClose={stopLiveCamera}>
                   <div className="scanner"><video ref={videoRef} muted playsInline /></div>
                   <div className="row end gap mt-sm">
-                    <button className="btn ghost" onClick={() => setLiveCamOpen(false)}>Cancel</button>
+                    <button className="btn ghost" onClick={stopLiveCamera}>Cancel</button>
                     <button className="btn primary" onClick={captureLiveFrame}>📸 Capture Photo</button>
                   </div>
                 </Modal>

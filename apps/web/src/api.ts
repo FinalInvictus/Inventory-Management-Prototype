@@ -13,6 +13,18 @@ export const tokenStore = {
 let onUnauthorized: () => void = () => {};
 export function setUnauthorizedHandler(fn: () => void) { onUnauthorized = fn; }
 
+// Fast in-memory GET cache for instant stale-while-revalidate screen transitions
+const getCache = new Map<string, { data: unknown; ts: number }>();
+
+export function clearApiCache() {
+  getCache.clear();
+}
+
+export function getCached<T>(path: string): T | undefined {
+  const entry = getCache.get(path);
+  return entry ? (entry.data as T) : undefined;
+}
+
 interface Opts { signal?: AbortSignal; raw?: BodyInit; contentType?: string }
 
 export async function api<T = unknown>(method: string, path: string, body?: unknown, opts: Opts = {}): Promise<T> {
@@ -40,6 +52,12 @@ export async function api<T = unknown>(method: string, path: string, body?: unkn
   if (!res.ok) {
     if (res.status === 401 && path !== '/api/v1/demo/login') onUnauthorized();
     throw new ApiError(res.status, data?.error?.code ?? 'error', data?.error?.message ?? `Request failed (${res.status})`);
+  }
+  if (method === 'GET') {
+    getCache.set(path, { data, ts: Date.now() });
+  } else {
+    // Mutations invalidate cached GET snapshots
+    getCache.clear();
   }
   return data as T;
 }

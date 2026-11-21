@@ -63,7 +63,15 @@ func (s *Store) saveLocked() error {
 	if err := os.WriteFile(tmp, b, 0o644); err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.statePath())
+	if err := os.Rename(tmp, s.statePath()); err != nil {
+		// Windows fallback if destination file is briefly held open
+		_ = os.Remove(s.statePath())
+		if rerr := os.Rename(tmp, s.statePath()); rerr != nil {
+			_ = os.Remove(tmp)
+			return os.WriteFile(s.statePath(), b, 0o644)
+		}
+	}
+	return nil
 }
 
 // Read runs fn with the state under lock (fn must not retain pointers).
