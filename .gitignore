@@ -1,0 +1,8 @@
+.cache/
+node_modules/
+apps/web/dist/
+backend/data/
+data/
+bin/
+*.exe
+e2e-artifacts/
