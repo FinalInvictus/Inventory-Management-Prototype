@@ -202,6 +202,16 @@ func (st *State) User(id string) *User {
 	return nil
 }
 
+func titleWords(s string) string {
+	words := strings.Fields(s)
+	for i, w := range words {
+		if len(w) > 0 {
+			words[i] = strings.ToUpper(w[:1]) + strings.ToLower(w[1:])
+		}
+	}
+	return strings.Join(words, " ")
+}
+
 func (st *State) Describe(g *Garment) string {
 	name := g.CategoryID
 	if c := st.Category(g.CategoryID); c != nil {
@@ -209,7 +219,7 @@ func (st *State) Describe(g *Garment) string {
 	}
 	parts := []string{}
 	if v := g.Attributes["color"]; v != "" {
-		parts = append(parts, strings.Title(v))
+		parts = append(parts, titleWords(v))
 	}
 	if v := g.Attributes["brand"]; v != "" {
 		parts = append(parts, v)

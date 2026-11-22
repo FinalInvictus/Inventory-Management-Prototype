@@ -212,3 +212,90 @@ func TestUploadAndFallbackClassification(t *testing.T) {
 	}
 	c.do("POST", "/api/v1/garments/classify", map[string]string{"image_ref": "upload:missing"}, 400)
 }
+
+func TestBackendBugFixesAndEdgeCases(t *testing.T) {
+	store, err := openTemp(t)
+	if err != nil {
+		t.Fatal(err)
+	}
+	staticDir := t.TempDir()
+	s := New(store, staticDir)
+	s.MockDelay = 0
+	ts := httptest.NewServer(s.Handler())
+	defer ts.Close()
+	c := &client{t: t, url: ts.URL}
+
+	// Login as admin
+	lr := c.do("POST", "/api/v1/demo/login", map[string]string{"role": "admin"}, 200)
+	tok := lr["token"].(string)
+
+	// 1. Authorization header must require Bearer scheme (case-insensitive) and reject raw token without scheme
+	reqRaw, _ := http.NewRequest("GET", ts.URL+"/api/v1/demo/me", nil)
+	reqRaw.Header.Set("Authorization", tok) // missing "Bearer " prefix
+	respRaw, err := http.DefaultClient.Do(reqRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	respRaw.Body.Close()
+	if respRaw.StatusCode != 401 {
+		t.Fatalf("expected 401 for Authorization header without Bearer prefix, got %d", respRaw.StatusCode)
+	}
+
+	reqLower, _ := http.NewRequest("GET", ts.URL+"/api/v1/demo/me", nil)
+	reqLower.Header.Set("Authorization", "bearer "+tok)
+	respLower, err := http.DefaultClient.Do(reqLower)
+	if err != nil {
+		t.Fatal(err)
+	}
+	respLower.Body.Close()
+	if respLower.StatusCode != 200 {
+		t.Fatalf("expected 200 for lowercase 'bearer ' scheme, got %d", respLower.StatusCode)
+	}
+
+	c.tok = tok
+
+	// 2. Missing static asset under /assets/* must return 404, not SPA index.html
+	respAsset, err := http.Get(ts.URL + "/assets/missing-bundle.js")
+	if err != nil {
+		t.Fatal(err)
+	}
+	respAsset.Body.Close()
+	if respAsset.StatusCode != 404 {
+		t.Fatalf("expected 404 for missing /assets/ file, got %d", respAsset.StatusCode)
+	}
+
+	// 3. PATCH /api/v1/batches/{id} should support updating reference
+	patchedBatch := c.do("PATCH", "/api/v1/batches/bat_1", map[string]any{"reference": "DON-NOV-99"}, 200)
+	if patchedBatch["reference"] != "DON-NOV-99" {
+		t.Fatalf("expected batch reference DON-NOV-99, got %v", patchedBatch["reference"])
+	}
+
+	// 4. AISnapshot should include human-readable suggested_name
+	g := c.do("POST", "/api/v1/garments", map[string]any{
+		"category_id": "casual_shirt",
+		"batch_id":    "bat_1",
+		"image_ref":   "sample:s01",
+		"ai":          map[string]any{"suggested": "formal_shirt", "confidence": 0.82, "source": "demo_mock"},
+	}, 201)
+	aiMap, _ := g["ai"].(map[string]any)
+	if aiMap["suggested_name"] != "Formal Shirt" {
+		t.Fatalf("expected ai.suggested_name = 'Formal Shirt', got %v", aiMap["suggested_name"])
+	}
+
+	// 5. Audit events should respect configured currency_symbol instead of hardcoded ₹
+	c.do("PUT", "/api/v1/settings", map[string]any{"currency": "USD", "currency_symbol": "$"}, 200)
+	c.do("PUT", "/api/v1/categories/jeans", map[string]any{"default_price": 820}, 200)
+	evs := c.do("GET", "/api/v1/events?limit=5", nil, 200)["events"].([]any)
+	latestDesc := evs[0].(map[string]any)["description"].(string)
+	if latestDesc == "" || latestDesc[0:5] != "Jeans" || !bytes.Contains([]byte(latestDesc), []byte("$820.00")) {
+		t.Fatalf("expected audit event to use configured '$' currency symbol, got %q", latestDesc)
+	}
+
+	// 6. Empty category update should not append a blank change event
+	beforeCount := len(c.do("GET", "/api/v1/events?limit=200", nil, 200)["events"].([]any))
+	c.do("PUT", "/api/v1/categories/jeans", map[string]any{}, 200)
+	afterCount := len(c.do("GET", "/api/v1/events?limit=200", nil, 200)["events"].([]any))
+	if afterCount != beforeCount {
+		t.Fatalf("expected no audit event for no-op category update, before=%d after=%d", beforeCount, afterCount)
+	}
+}

@@ -84,9 +84,17 @@ func token() string {
 
 type handler func(w http.ResponseWriter, r *http.Request, u demo.User) error
 
+func extractBearerToken(hdr string) string {
+	const prefix = "bearer "
+	if len(hdr) > len(prefix) && strings.EqualFold(hdr[:len(prefix)], prefix) {
+		return strings.TrimSpace(hdr[len(prefix):])
+	}
+	return ""
+}
+
 func (s *Server) auth(roles []string, h handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+		tok := extractBearerToken(r.Header.Get("Authorization"))
 		s.mu.Lock()
 		uid, ok := s.sessions[tok]
 		s.mu.Unlock()
@@ -198,6 +206,10 @@ func (s *Server) static(w http.ResponseWriter, r *http.Request) {
 		http.ServeFile(w, r, p)
 		return
 	}
+	if strings.HasPrefix(r.URL.Path, "/assets/") {
+		http.NotFound(w, r)
+		return
+	}
 	w.Header().Set("Cache-Control", "no-cache")
 	http.ServeFile(w, r, filepath.Join(s.StaticDir, "index.html")) // SPA fallback
 }
@@ -252,7 +264,7 @@ func (s *Server) me(w http.ResponseWriter, r *http.Request, u demo.User) error {
 }
 
 func (s *Server) logout(w http.ResponseWriter, r *http.Request, u demo.User) error {
-	tok := strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
+	tok := extractBearerToken(r.Header.Get("Authorization"))
 	s.mu.Lock()
 	delete(s.sessions, tok)
 	s.mu.Unlock()
@@ -358,6 +370,11 @@ func (s *Server) createCategory(w http.ResponseWriter, r *http.Request, u demo.U
 			if p == nil || p.ParentID != "" {
 				return errf(400, "validation", "Parent must be an existing top-level group")
 			}
+			for _, g := range st.Garments {
+				if g.CategoryID == p.ID {
+					return errf(400, "validation", "Parent cannot be a leaf category that already holds garments")
+				}
+			}
 			c.ParentID = p.ID
 		}
 		if in.DefaultPrice != nil {
@@ -401,7 +418,11 @@ func (s *Server) updateCategory(w http.ResponseWriter, r *http.Request, u demo.U
 			if err := pricing.Validate(*in.DefaultPrice); err != nil {
 				return errf(400, "validation", "%v", err)
 			}
-			changes = append(changes, fmt.Sprintf("default price ₹%.2f → ₹%.2f", c.DefaultPrice, *in.DefaultPrice))
+			sym := st.Settings.CurrencySymbol
+			if sym == "" {
+				sym = "₹"
+			}
+			changes = append(changes, fmt.Sprintf("default price %s%.2f → %s%.2f", sym, c.DefaultPrice, sym, *in.DefaultPrice))
 			c.DefaultPrice = pricing.Round2(*in.DefaultPrice)
 		}
 		if in.Active != nil {
@@ -412,7 +433,9 @@ func (s *Server) updateCategory(w http.ResponseWriter, r *http.Request, u demo.U
 			c.Subcategories = in.Subcategories
 			changes = append(changes, "subcategories")
 		}
-		st.AddEvent(s.Store.Now(), c.ID, "category", "updated", c.Name+": "+strings.Join(changes, ", ")+" (existing garments keep their saved price)", u.ID)
+		if len(changes) > 0 {
+			st.AddEvent(s.Store.Now(), c.ID, "category", "updated", c.Name+": "+strings.Join(changes, ", ")+" (existing garments keep their saved price)", u.ID)
+		}
 		updated = *c
 		return nil
 	})
@@ -515,7 +538,11 @@ func (s *Server) createBatch(w http.ResponseWriter, r *http.Request, u demo.User
 		st.Batches = append(st.Batches, b)
 		desc := "Batch " + b.Name + " created"
 		if b.DefaultPrice != nil {
-			desc += fmt.Sprintf(" with default price ₹%.2f", *b.DefaultPrice)
+			sym := st.Settings.CurrencySymbol
+			if sym == "" {
+				sym = "₹"
+			}
+			desc += fmt.Sprintf(" with default price %s%.2f", sym, *b.DefaultPrice)
 		}
 		st.AddEvent(b.CreatedAt, b.ID, "batch", "created", desc, u.ID)
 		out = batchViewOf(st, b)
@@ -546,6 +573,13 @@ func (s *Server) updateBatch(w http.ResponseWriter, r *http.Request, u demo.User
 			}
 			b.Name = strings.TrimSpace(n)
 		}
+		if v, ok := raw["reference"]; ok {
+			var ref string
+			if json.Unmarshal(v, &ref) != nil {
+				return errf(400, "validation", "Batch reference must be a string")
+			}
+			b.Reference = strings.TrimSpace(ref)
+		}
 		if v, ok := raw["default_price"]; ok {
 			if string(v) == "null" {
 				b.DefaultPrice = nil
@@ -560,7 +594,11 @@ func (s *Server) updateBatch(w http.ResponseWriter, r *http.Request, u demo.User
 				}
 				p = pricing.Round2(p)
 				b.DefaultPrice = &p
-				st.AddEvent(s.Store.Now(), b.ID, "batch", "updated", fmt.Sprintf("Batch default price set to ₹%.2f", p), u.ID)
+				sym := st.Settings.CurrencySymbol
+				if sym == "" {
+					sym = "₹"
+				}
+				st.AddEvent(s.Store.Now(), b.ID, "batch", "updated", fmt.Sprintf("Batch default price set to %s%.2f", sym, p), u.ID)
 			}
 		}
 		out = batchViewOf(st, *b)
@@ -825,6 +863,15 @@ type garmentView struct {
 }
 
 func viewOf(st *demo.State, g demo.Garment, withEvents bool) garmentView {
+	if g.AI != nil && g.AI.SuggestedName == "" {
+		cp := *g.AI
+		if c := st.Category(cp.Suggested); c != nil {
+			cp.SuggestedName = c.Name
+		} else {
+			cp.SuggestedName = cp.Suggested
+		}
+		g.AI = &cp
+	}
 	v := garmentView{Garment: g, ImageURL: imageURL(g.ImageRef), BarcodeURL: "/api/v1/barcodes/" + g.Barcode + "/svg", Description: st.Describe(&g)}
 	if c := st.Category(g.CategoryID); c != nil {
 		v.CategoryName = c.Name
@@ -885,6 +932,11 @@ func (s *Server) createGarment(w http.ResponseWriter, r *http.Request, u demo.Us
 		if in.AI != nil && in.AI.Suggested != "" {
 			snap := *in.AI
 			snap.Accepted = snap.Suggested == in.CategoryID
+			if c := st.Category(snap.Suggested); c != nil {
+				snap.SuggestedName = c.Name
+			} else {
+				snap.SuggestedName = snap.Suggested
+			}
 			g.AI = &snap
 		}
 		st.Garments = append(st.Garments, g)
@@ -893,14 +945,15 @@ func (s *Server) createGarment(w http.ResponseWriter, r *http.Request, u demo.Us
 			if g.AI.Accepted {
 				st.AddEvent(now, g.ID, "garment", "ai_accepted", fmt.Sprintf("AI suggestion %s accepted (%s, est. %.0f%%)", cat, g.AI.Source, g.AI.Confidence*100), u.ID)
 			} else {
-				sug := g.AI.Suggested
-				if c := st.Category(sug); c != nil {
-					sug = c.Name
-				}
+				sug := g.AI.SuggestedName
 				st.AddEvent(now, g.ID, "garment", "ai_corrected", fmt.Sprintf("Employee changed AI suggestion %s → %s", sug, cat), u.ID)
 			}
 		}
-		st.AddEvent(now, g.ID, "garment", "created", fmt.Sprintf("Registered as %s, code %s, price ₹%.2f [%s price]", cat, g.Barcode, g.Price, g.PriceSource), u.ID)
+		sym := st.Settings.CurrencySymbol
+		if sym == "" {
+			sym = "₹"
+		}
+		st.AddEvent(now, g.ID, "garment", "created", fmt.Sprintf("Registered as %s, code %s, price %s%.2f [%s price]", cat, g.Barcode, sym, g.Price, g.PriceSource), u.ID)
 		out = viewOf(st, g, true)
 		return nil
 	})
@@ -1131,7 +1184,11 @@ func (s *Server) checkout(w http.ResponseWriter, r *http.Request, u demo.User) e
 			g.Status, g.SaleID = "sold", sale.ID
 			st.AddEvent(now, g.ID, "garment", "sold", "Sold in "+sale.Number, u.ID)
 		}
-		st.AddEvent(now, sale.ID, "sale", "completed", fmt.Sprintf("%s completed via %s, total ₹%.2f (demo payment)", sale.Number, sale.PaymentMethod, sale.Total), u.ID)
+		sym := st.Settings.CurrencySymbol
+		if sym == "" {
+			sym = "₹"
+		}
+		st.AddEvent(now, sale.ID, "sale", "completed", fmt.Sprintf("%s completed via %s, total %s%.2f (demo payment)", sale.Number, sale.PaymentMethod, sym, sale.Total), u.ID)
 		out = saleViewOf(st, *sale)
 		return nil
 	})

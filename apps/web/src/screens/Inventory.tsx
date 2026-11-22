@@ -164,7 +164,7 @@ export function InventoryScreen() {
 
 export function ItemDetailScreen() {
   const { id } = useParams<{ id: string }>();
-  const { money } = useApp();
+  const { money, catName } = useApp();
   const nav = useNavigate();
 
   const [garment, setGarment] = useState<Garment | null>(null);
@@ -252,7 +252,7 @@ export function ItemDetailScreen() {
               {garment.ai && (
                 <div className="mt-sm pt-sm border-top row between center-v">
                   <span className="muted small">
-                    AI Suggestion: <b>{garment.ai.suggested}</b> ({Math.round(garment.ai.confidence * 100)}% est. · {garment.ai.source})
+                    AI Suggestion: <b data-testid="detail-ai-suggested">{garment.ai.suggested_name || catName(garment.ai.suggested)}</b> ({Math.round(garment.ai.confidence * 100)}% est. · {garment.ai.source})
                   </span>
                   <Tag kind={garment.ai.accepted ? 'ok' : 'warn'}>
                     {garment.ai.accepted ? 'Accepted' : 'Employee Corrected'}

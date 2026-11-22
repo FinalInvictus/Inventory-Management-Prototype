@@ -39,10 +39,11 @@ type Batch struct {
 
 // AISnapshot records what the classifier suggested versus what was saved.
 type AISnapshot struct {
-	Suggested  string  `json:"suggested"`
-	Confidence float64 `json:"confidence"`
-	Source     string  `json:"source"`
-	Accepted   bool    `json:"accepted"`
+	Suggested     string  `json:"suggested"`
+	SuggestedName string  `json:"suggested_name,omitempty"`
+	Confidence    float64 `json:"confidence"`
+	Source        string  `json:"source"`
+	Accepted      bool    `json:"accepted"`
 }
 
 type Garment struct {

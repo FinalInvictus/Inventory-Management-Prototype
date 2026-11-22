@@ -78,10 +78,14 @@ func Seed(now time.Time) *State {
 		for k, v := range smp.Attributes {
 			attrs[k] = v
 		}
+		sugName := smp.Category
+		if c := s.Category(smp.Category); c != nil {
+			sugName = c.Name
+		}
 		gm := Garment{
 			ID: id, CategoryID: it.cat, BatchID: it.batch, Barcode: s.NextBarcode(created), ImageRef: "sample:" + it.sample,
 			Attributes: attrs, Price: it.price, PriceSource: it.source, Status: "available",
-			AI:        &AISnapshot{Suggested: smp.Category, Confidence: smp.Confidence, Source: "demo_mock", Accepted: true},
+			AI:        &AISnapshot{Suggested: smp.Category, SuggestedName: sugName, Confidence: smp.Confidence, Source: "demo_mock", Accepted: true},
 			CreatedBy: s.batchCreator(it.batch), CreatedAt: created,
 		}
 		s.Garments = append(s.Garments, gm)

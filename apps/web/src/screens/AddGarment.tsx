@@ -9,7 +9,7 @@ import type { Batch, Classification, Garment, PriceSource, Sample } from '../typ
 type Step = 'batch' | 'camera' | 'intake' | 'barcode';
 
 export function AddGarmentScreen() {
-  const { categories, money, catName, refreshMeta, bumpDataVersion, toast } = useApp();
+  const { categories, money, catName, refreshMeta, bumpDataVersion, dataVersion, toast } = useApp();
   const nav = useNavigate();
 
   const [step, setStep] = useState<Step>('batch');
@@ -59,6 +59,7 @@ export function AddGarmentScreen() {
 
   // Pricing state
   const [priceMode, setPriceMode] = useState<PriceSource>('category');
+  const userEditedPriceMode = useRef(false);
   const [overrideInput, setOverrideInput] = useState('');
   const [batchPriceInput, setBatchPriceInput] = useState('');
   const [savingBatchPrice, setSavingBatchPrice] = useState(false);
@@ -83,14 +84,17 @@ export function AddGarmentScreen() {
       if (b.batches.length > 0) {
         setSelectedBatchId(b.batches[0].id);
         setBatchPriceInput(b.batches[0].default_price != null ? String(b.batches[0].default_price) : '');
+        setPriceMode(b.batches[0].default_price != null ? 'batch' : 'category');
       }
       setSamples(s.samples.filter(x => x.intake));
     });
-  }, []);
+  }, [dataVersion]);
 
   const selectBatch = (b: Batch) => {
     setSelectedBatchId(b.id);
     setBatchPriceInput(b.default_price != null ? String(b.default_price) : '');
+    setPriceMode(b.default_price != null ? 'batch' : 'category');
+    userEditedPriceMode.current = false;
   };
 
   const handleCreateBatch = async (e: React.FormEvent) => {
@@ -135,11 +139,13 @@ export function AddGarmentScreen() {
         setCategoryId(res.category);
         if (res.attributes?.color) setColor(res.attributes.color);
       }
-      // Set default price mode based on whether batch has default price
-      if (currentBatch?.default_price != null) {
-        setPriceMode('batch');
-      } else {
-        setPriceMode('category');
+      // Only set default price mode if employee has not manually chosen a pricing mode
+      if (!userEditedPriceMode.current) {
+        if (currentBatch?.default_price != null) {
+          setPriceMode('batch');
+        } else {
+          setPriceMode('category');
+        }
       }
     } catch (err) {
       if ((err as Error).name === 'AbortError') return;
@@ -622,7 +628,10 @@ export function AddGarmentScreen() {
                   type="button"
                   data-testid="price-mode-category"
                   className={`price-mode-card ${effectiveSource === 'category' ? 'selected' : ''}`}
-                  onClick={() => setPriceMode('category')}
+                  onClick={() => {
+                    userEditedPriceMode.current = true;
+                    setPriceMode('category');
+                  }}
                 >
                   <div className="row between">
                     <b>1. Category Default</b>
@@ -636,7 +645,12 @@ export function AddGarmentScreen() {
                   <div
                     className="row between clickable"
                     data-testid="price-mode-batch"
-                    onClick={() => batchPrice != null && setPriceMode('batch')}
+                    onClick={() => {
+                      if (batchPrice != null) {
+                        userEditedPriceMode.current = true;
+                        setPriceMode('batch');
+                      }
+                    }}
                   >
                     <b>2. Batch Default ({currentBatch?.name})</b>
                     <b>{batchPrice != null ? money(batchPrice) : 'Not set'}</b>
@@ -669,7 +683,10 @@ export function AddGarmentScreen() {
                   <div
                     className="row between clickable"
                     data-testid="price-mode-individual"
-                    onClick={() => setPriceMode('individual')}
+                    onClick={() => {
+                      userEditedPriceMode.current = true;
+                      setPriceMode('individual');
+                    }}
                   >
                     <b>3. Individual Override</b>
                     <b>{overrideNum != null && !Number.isNaN(overrideNum) ? money(overrideNum) : 'Enter below'}</b>
@@ -681,8 +698,12 @@ export function AddGarmentScreen() {
                       min="0"
                       step="1"
                       value={overrideInput}
-                      onFocus={() => setPriceMode('individual')}
+                      onFocus={() => {
+                        userEditedPriceMode.current = true;
+                        setPriceMode('individual');
+                      }}
                       onChange={e => {
+                        userEditedPriceMode.current = true;
                         setOverrideInput(e.target.value);
                         setPriceMode('individual');
                       }}

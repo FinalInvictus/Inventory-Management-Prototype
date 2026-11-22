@@ -28,9 +28,16 @@ export function AdminShell({ children, title }: { children: React.ReactNode; tit
   // Ensure admin privileges if user switched straight to /admin
   useEffect(() => {
     if (user && user.role !== 'admin') {
-      login({ role: 'admin' }).then(u => toast(`Switched to ${u.name} (admin)`));
+      login({ role: 'admin' }).then(u => {
+        bumpDataVersion();
+        toast(`Switched to ${u.name} (admin)`);
+      });
     }
-  }, [user]);
+  }, [user, login, bumpDataVersion, toast]);
+
+  if (user && user.role !== 'admin') {
+    return <div className="page-center"><Spinner label="Switching to Admin session…" /></div>;
+  }
 
   const switchToEmployee = async () => {
     setBusy(true);
@@ -328,7 +335,7 @@ export function AdminOverviewScreen() {
 
 // 2. ADMIN INVENTORY SCREEN
 export function AdminInventoryScreen() {
-  const { categories, money, dataVersion } = useApp();
+  const { categories, money, catName, dataVersion } = useApp();
   const [items, setItems] = useState<Garment[]>(() => getCached<{ items: Garment[] }>('/api/v1/garments?')?.items ?? []);
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('all');
@@ -452,7 +459,7 @@ export function AdminInventoryScreen() {
 
               {selected.ai && (
                 <div className="ai-notice">
-                  AI Suggested: <b>{selected.ai.suggested}</b> ({Math.round(selected.ai.confidence * 100)}% est., {selected.ai.source}) —{' '}
+                  AI Suggested: <b data-testid="admin-detail-ai-suggested">{selected.ai.suggested_name || catName(selected.ai.suggested)}</b> ({Math.round(selected.ai.confidence * 100)}% est., {selected.ai.source}) —{' '}
                   <b>{selected.ai.accepted ? 'Accepted by employee' : 'Corrected by employee'}</b>
                 </div>
               )}
@@ -488,7 +495,7 @@ export function AdminCategoriesScreen() {
   const [subcats, setSubcats] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const parents = categories.filter(c => !c.parent_id);
+  const parents = categories.filter(c => !c.parent_id && !c.is_leaf);
   const leaves = categories.filter(c => c.is_leaf);
 
   const toggleActive = async (c: Category) => {
@@ -614,13 +621,14 @@ export function AdminCategoriesScreen() {
 
 // 4. ADMIN PRICING SCREEN
 export function AdminPricingScreen() {
-  const { categories, refreshMeta, money, toast } = useApp();
+  const { categories, refreshMeta, money, toast, dataVersion } = useApp();
   const [edits, setEdits] = useState<Record<string, string>>({});
   const [batches, setBatches] = useState<Batch[]>([]);
 
   useEffect(() => {
+    setEdits({});
     get<{ batches: Batch[] }>('/api/v1/batches').then(r => setBatches(r.batches));
-  }, []);
+  }, [dataVersion]);
 
   const savePrice = async (c: Category) => {
     const raw = edits[c.id];
@@ -741,16 +749,17 @@ export function AdminPricingScreen() {
 
 // 5. ADMIN SALES SCREEN
 export function AdminSalesScreen() {
-  const { money } = useApp();
+  const { money, dataVersion } = useApp();
   const [sales, setSales] = useState<Sale[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<Sale | null>(null);
 
   useEffect(() => {
+    setLoading(true);
     get<{ sales: Sale[] }>('/api/v1/sales')
       .then(r => setSales(r.sales))
       .finally(() => setLoading(false));
-  }, []);
+  }, [dataVersion]);
 
   return (
     <AdminShell title="Demo Sales & Receipts">

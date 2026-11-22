@@ -11,7 +11,7 @@ export interface Batch {
   default_price: number | null; created_by: string; created_by_name: string; created_at: string; garment_count: number;
 }
 
-export interface AISnapshot { suggested: string; confidence: number; source: string; accepted?: boolean }
+export interface AISnapshot { suggested: string; suggested_name?: string; confidence: number; source: string; accepted?: boolean }
 
 export interface AppEvent {
   id: string; entity_id: string; entity_type: string; action: string; timestamp: string; description: string; actor?: string;

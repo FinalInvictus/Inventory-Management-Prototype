@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { useApp } from '../context';
 import {
@@ -15,7 +15,7 @@ import { MobileShell } from './MobileHome';
 import type { Garment, Sale } from '../types';
 
 export function CheckoutScreen() {
-  const { settings, money, refreshMeta, bumpDataVersion, toast } = useApp();
+  const { settings, money, refreshMeta, bumpDataVersion, dataVersion, toast } = useApp();
   const nav = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -30,6 +30,8 @@ export function CheckoutScreen() {
   const [scanOpen, setScanOpen] = useState(false);
   const [err, setErr] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const draftRef = useRef<{ key: string; id: string } | null>(null);
+  const prevDataVersion = useRef(dataVersion);
 
   const loadAvailable = async () => {
     const [g, c] = await Promise.all([
@@ -41,8 +43,13 @@ export function CheckoutScreen() {
   };
 
   useEffect(() => {
+    if (prevDataVersion.current !== dataVersion) {
+      prevDataVersion.current = dataVersion;
+      setCart([]);
+      draftRef.current = null;
+    }
     loadAvailable();
-  }, []);
+  }, [dataVersion]);
 
   const addByCode = async (rawCode: string) => {
     const code = rawCode.trim();
@@ -96,15 +103,26 @@ export function CheckoutScreen() {
     setErr('');
     setSubmitting(true);
     try {
-      const draft = await post<Sale>('/api/v1/sales', {
+      const draftKey = JSON.stringify({
         items: cart.map(g => g.id),
         discount,
-        customer_id: customerId || undefined,
+        customer_id: customerId || '',
       });
-      const completed = await post<Sale>(`/api/v1/sales/${draft.id}/checkout`, {
+      let draftId = draftRef.current?.key === draftKey ? draftRef.current.id : '';
+      if (!draftId) {
+        const draft = await post<Sale>('/api/v1/sales', {
+          items: cart.map(g => g.id),
+          discount,
+          customer_id: customerId || undefined,
+        });
+        draftId = draft.id;
+        draftRef.current = { key: draftKey, id: draftId };
+      }
+      const completed = await post<Sale>(`/api/v1/sales/${draftId}/checkout`, {
         payment_method: paymentMethod,
         amount_tendered: paymentMethod === 'cash' ? tendered : undefined,
       });
+      draftRef.current = null;
       bumpDataVersion();
       refreshMeta().catch(() => {});
       toast(`Sale ${completed.number} completed!`);

@@ -131,7 +131,9 @@ try {
   await page.screenshot({ path: join(ART_DIR, '08-inventory-search.png') });
   await page.getByTestId(`inventory-card-${newBarcode}`).click();
   await page.getByTestId('item-detail-card').waitFor();
-  pass('PT-008', `Inventory search found ${newBarcode} and opened item detail`);
+  const aiSuggestedText = await page.getByTestId('detail-ai-suggested').innerText();
+  assert(aiSuggestedText === 'Formal Shirt', `Expected human-readable AI suggested name 'Formal Shirt', got ${aiSuggestedText}`);
+  pass('PT-008', `Inventory search found ${newBarcode} and opened item detail with AI provenance (${aiSuggestedText})`);
 
   // PT-009: Barcode scan or manual entry resolves the correct item in Checkout
   await page.getByTestId('nav-checkout').click();
